@@ -10,6 +10,8 @@
 #include <queue>
 #include <vector>
 
+#include <immintrin.h>
+
 float l2_distance(float *a, float *b, int size) {
     float sum = 0;
     for (int i = 0; i < size; i++) {
@@ -19,7 +21,35 @@ float l2_distance(float *a, float *b, int size) {
     return sqrt(sum);
 }
 
-float (*distance)(float *a, float *b, int size) = l2_distance;
+// l2 distance using SSE2
+float l2_distance_sse2(float *a, float *b, int size) {
+    float sum = 0;
+    for (int i = 0; i < size; i += 4) {
+        __m128 a4 = _mm_load_ps(a + i);
+        __m128 b4 = _mm_load_ps(b + i);
+        __m128 diff = _mm_sub_ps(a4, b4);
+        __m128 diff2 = _mm_mul_ps(diff, diff);
+        sum += diff2[0] + diff2[1] + diff2[2] + diff2[3];
+    }
+    return sqrt(sum);
+}
+
+// l2 distance using AVX
+/*float l2_distance_avx(float *a, float *b, int size) {
+    float sum = 0;
+    for (int i = 0; i < size; i += 8) {
+        __m256 a8 = _mm256_load_ps(a + i);
+        __m256 b8 = _mm256_load_ps(b + i);
+        __m256 diff = _mm256_sub_ps(a8, b8);
+        __m256 diff2 = _mm256_mul_ps(diff, diff);
+        sum += diff2[0] + diff2[1] + diff2[2] + diff2[3] + diff2[4] + diff2[5] + diff2[6] + diff2[7];
+    }
+    return sqrt(sum);
+}*/
+
+float (*distance)(float *a, float *b, int size) = l2_distance_sse2;
+
+class HNSWNode;
 
 // Quick select algorithm
 int partition(std::vector<std::pair<float, HNSWNode*>> &arr, int left, int right) {
@@ -68,9 +98,9 @@ public:
 
 class HNSWLevel {
     int level;
-    std::vector<HNSWNode*> nodes;
 
 public:
+    std::vector<HNSWNode*> nodes;
     HNSWLevel(int level) : level(level) {}
 
     void addNode(HNSWNode *node) {
@@ -86,6 +116,8 @@ class HNSW {
     int maxLevel = -1; // max level of the graph
     double mult = 0; // multiplier for the number of nodes in each level
     int dataSize = 0; // size of the data vectors
+
+    size_t max_elements = 0; // max number of elements in the graph
 
     std::vector<HNSWLevel*> levels;
     HNSWNode *entryPoint = nullptr;
@@ -112,8 +144,8 @@ class HNSW {
     typedef std::priority_queue<std::pair<float, HNSWNode*>, std::vector<std::pair<float, HNSWNode*>>, CompareByFirst> priority_queue_t;
 
 public:
-    HNSW(int M, int efConstruction, int efSearch, int dataSize, int seed = 42) :
-            M(M), efConstruction(efConstruction), efSearch(efSearch), dataSize(dataSize) {
+    HNSW(int M, int efConstruction, int efSearch, int dataSize, size_t max_elements, int seed = 42) :
+            M(M), efConstruction(efConstruction), efSearch(efSearch), dataSize(dataSize), max_elements(max_elements) {
         mult = 1 / log(1.0 * M);
         M_0 = 2 * M;
         level_generator.seed(seed);
@@ -150,7 +182,7 @@ public:
             currNode = minNode->nextLevel;
         }
 
-        std::vector<std::pair<float, HNSWNode*>> entry_points = {std::make_pair(distance(data, currNode->data, dataSize), entryPoint)}; 
+        std::vector<std::pair<float, HNSWNode*>> entry_points = {std::make_pair(distance(data, currNode->data, dataSize), currNode)}; 
         return _search_layer(data, entry_points, k, 0);
     }
 
@@ -196,7 +228,7 @@ public:
 
                 float distanceFurthestLoop = result.back().first;
 
-                int i = 0, furthest_index;
+                int i = 0, furthest_index = result.size() - 1;
                 for (auto &result_element : result) {
                     if (result_element.first > distanceFurthestLoop) {
                         distanceFurthestLoop = result_element.first;
@@ -228,6 +260,10 @@ public:
     // Neighbor selection algorithm using quickselect
     std::vector<std::pair<float, HNSWNode*>> selectNeighbors(float *data, std::vector<std::pair<float, HNSWNode*>> candidates, size_t numNeighbors, int level) {
         // Find numNeighbors closest elements out of candidates
+        if (candidates.size() <= numNeighbors) {
+            return candidates;
+        }
+
         quickselect(candidates, 0, candidates.size() - 1, numNeighbors);
         return std::vector<std::pair<float, HNSWNode*>>(candidates.begin(), candidates.begin() + numNeighbors);
     }
@@ -287,7 +323,11 @@ public:
 
             // Iterate over the lower levels, finding the efConstruction nearest neighbors
             std::vector<std::pair<float, HNSWNode*>> entry_points = {std::make_pair(distance(data, currNode->data, dataSize), currNode)};
-            for (int i = level; i >= 0; i--) {
+            int iterLevel = level;
+            if (level > maxLevel) {
+                iterLevel = maxLevel;
+            }
+            for (int i = iterLevel; i >= 0; i--) {
                 // Search the layer
                 std::vector<std::pair<float, HNSWNode*>> result = _search_layer(data, entry_points, efConstruction, i);
 
@@ -297,12 +337,14 @@ public:
                 // Make new node
                 HNSWNode *newNode = new HNSWNode(0, i, data, M);
                 levels[i]->addNode(newNode);
-                prevLevelNode->setNextLevel(newNode);
-                prevLevelNode = newNode;
 
-                if (i == level) {
+                if (i == iterLevel) {
                     topLevelNode = newNode;
+                } else {
+                    prevLevelNode->setNextLevel(newNode);
                 }
+
+                prevLevelNode = newNode;
 
                 // Add bidirectional connections from neighbors to q
                 for (auto &neighborPair : selectedNeighbors) {
@@ -334,7 +376,12 @@ public:
 
         // Create new levels if needed
         for (int i = maxLevel + 1; i <= level; i++) {
+
+            std::cout << "Creating level " << i << std::endl;
             HNSWLevel *newLevel = new HNSWLevel(i);
+            if (i == 0) {
+                newLevel->nodes.reserve(max_elements);
+            }
             levels.push_back(newLevel);
             
             HNSWNode *node = new HNSWNode(0, i, data, M);
@@ -350,5 +397,20 @@ public:
                 maxLevel = level;
             }
         }
+    }
+
+    float *bruteForceSearch(float *data) {
+        float minDist = distance(data, entryPoint->data, dataSize);
+        float *minNode = entryPoint->data;
+
+        for (auto &node : levels[0]->nodes) {
+            float dist = distance(data, node->data, dataSize);
+            if (dist < minDist) {
+                minDist = dist;
+                minNode = node->data;
+            }
+        }
+
+        return minNode;
     }
 };
