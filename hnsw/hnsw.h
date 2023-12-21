@@ -62,6 +62,39 @@ float ip_distance_avx512(float *a, float *b, int size) {
 }
 #endif
 
+// ip distance using ARM NEON
+#ifdef __ARM_NEON
+
+#include <arm_neon.h>
+
+float ip_distance_neon(float *a, float *b, int size) {
+    float32x4_t sum = vdupq_n_f32(0);
+    for (int i = 0; i < size; i += 4) {
+        float32x4_t a4 = vld1q_f32(a + i);
+        float32x4_t b4 = vld1q_f32(b + i);
+        sum = vmlaq_f32(sum, a4, b4);
+    }
+    return 1.0f - sum[0] - sum[1] - sum[2] - sum[3];
+}
+#endif
+
+// ip distance using ARM SVE
+#ifdef __ARM_FEATURE_SVE
+
+#include <arm_sve.h>
+
+float ip_distance_sve(float *a, float *b, int size) {
+    float32_t sum = 0;
+    for (int i = 0; i < size; i += svcntw()) {
+        svbool_t pg = svwhilelt_b32(i, size);
+        svfloat32_t a4 = svld1(pg, a + i);
+        svfloat32_t b4 = svld1(pg, b + i);
+        sum += svaddv_z(pg, svmul_f32_z(pg, a4, b4));
+    }
+    return 1.0f - sum;
+}
+#endif
+
 float l2_distance(float *a, float *b, int size) {
     float sum = 0;
     for (int i = 0; i < size; i++) {
@@ -135,6 +168,41 @@ float l2_distance_avx512(float *a, float *b, int size) {
         sum = _mm512_add_ps(sum, _mm512_mul_ps(diff, diff));
     }
     return sum[0] + sum[1] + sum[2] + sum[3] + sum[4] + sum[5] + sum[6] + sum[7] + sum[8] + sum[9] + sum[10] + sum[11] + sum[12] + sum[13] + sum[14] + sum[15];
+}
+#endif
+
+// l2 distance using ARM NEON
+#ifdef __ARM_NEON
+
+#include <arm_neon.h>
+
+float l2_distance_neon(float *a, float *b, int size) {
+    float32x4_t sum = vdupq_n_f32(0);
+    for (int i = 0; i < size; i += 4) {
+        float32x4_t a4 = vld1q_f32(a + i);
+        float32x4_t b4 = vld1q_f32(b + i);
+        float32x4_t diff = vsubq_f32(a4, b4);
+        sum = vmlaq_f32(sum, diff, diff);
+    }
+    return sum[0] + sum[1] + sum[2] + sum[3];
+}
+#endif
+
+// l2 distance using ARM SVE
+#ifdef __ARM_FEATURE_SVE
+
+#include <arm_sve.h>
+
+float l2_distance_sve(float *a, float *b, int size) {
+    float32_t sum = 0;
+    for (int i = 0; i < size; i += svcntw()) {
+        svbool_t pg = svwhilelt_b32(i, size);
+        svfloat32_t a4 = svld1(pg, a + i);
+        svfloat32_t b4 = svld1(pg, b + i);
+        svfloat32_t diff = svsub_f32_z(pg, a4, b4);
+        sum += svaddv_z(pg, svmul_f32_z(pg, diff, diff));
+    }
+    return sum;
 }
 #endif
 
@@ -377,7 +445,7 @@ public:
             return candidates;
         }
 
-        quickselect_vector(candidates, 0, candidates.size() - 1, numNeighbors);
+        quickselect(candidates, 0, candidates.size() - 1, numNeighbors);
         return std::vector<std::pair<float, HNSWNode*>>(candidates.begin(), candidates.begin() + numNeighbors);
     }
 
