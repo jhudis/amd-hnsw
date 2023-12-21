@@ -12,13 +12,45 @@
 
 #include <immintrin.h>
 
+float ip_distance(float *a, float *b, int size) {
+    float sum = 0;
+    for (int i = 0; i < size; i++) {
+        sum += a[i] * b[i];
+    }
+    return 1.0f - sum;
+}
+
+// ip distance using SSE2
+float ip_distance_sse2(float *a, float *b, int size) {
+    float sum = 0;
+    for (int i = 0; i < size; i += 4) {
+        __m128 v1 = _mm_load_ps(a + i);
+        __m128 v2 = _mm_load_ps(b + i);
+        __m128 prod = _mm_mul_ps(v1, v2);
+        sum += prod[0] + prod[1] + prod[2] + prod[3];
+    }
+    return 1.0f - sum;
+}
+
+// ip distance using AVX
+float ip_distance_avx(float *a, float *b, int size) {
+    float sum = 0;
+    for (int i = 0; i < size; i += 8) {
+        __m256 v1 = _mm256_load_ps(a + i);
+        __m256 v2 = _mm256_load_ps(b + i);
+        __m256 prod = _mm256_mul_ps(v1, v2);
+        sum += prod[0] + prod[1] + prod[2] + prod[3] + prod[4] + prod[5] + prod[6] + prod[7];
+    }
+    return 1.0f - sum;
+}
+
 float l2_distance(float *a, float *b, int size) {
     float sum = 0;
     for (int i = 0; i < size; i++) {
         float diff = a[i] - b[i];
         sum += diff * diff;
     }
-    return sqrt(sum);
+    return sum;
 }
 
 // l2 distance using SSE2
@@ -31,11 +63,38 @@ float l2_distance_sse2(float *a, float *b, int size) {
         __m128 diff2 = _mm_mul_ps(diff, diff);
         sum += diff2[0] + diff2[1] + diff2[2] + diff2[3];
     }
-    return sqrt(sum);
+    return sum;
+}
+
+float l2_distance_sse2_unrolled(float *a, float *b, int size) {
+    __m128 v1, v2, diff, sum;
+    sum = _mm_setzero_ps();
+    for (int i = 0; i < size; i += 16) {
+        v1 = _mm_load_ps(a + i);
+        v2 = _mm_load_ps(b + i);
+        diff = _mm_sub_ps(v1, v2);
+        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
+
+        v1 = _mm_load_ps(a + i + 4);
+        v2 = _mm_load_ps(b + i + 4);
+        diff = _mm_sub_ps(v1, v2);
+        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
+
+        v1 = _mm_load_ps(a + i + 8);
+        v2 = _mm_load_ps(b + i + 8);
+        diff = _mm_sub_ps(v1, v2);
+        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
+
+        v1 = _mm_load_ps(a + i + 12);
+        v2 = _mm_load_ps(b + i + 12);
+        diff = _mm_sub_ps(v1, v2);
+        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));    
+    }
+    return sum[0] + sum[1] + sum[2] + sum[3];
 }
 
 // l2 distance using AVX
-/*float l2_distance_avx(float *a, float *b, int size) {
+float l2_distance_avx(float *a, float *b, int size) {
     float sum = 0;
     for (int i = 0; i < size; i += 8) {
         __m256 a8 = _mm256_load_ps(a + i);
@@ -44,10 +103,22 @@ float l2_distance_sse2(float *a, float *b, int size) {
         __m256 diff2 = _mm256_mul_ps(diff, diff);
         sum += diff2[0] + diff2[1] + diff2[2] + diff2[3] + diff2[4] + diff2[5] + diff2[6] + diff2[7];
     }
-    return sqrt(sum);
-}*/
+    return sum;
+}
 
-float (*distance)(float *a, float *b, int size) = l2_distance_sse2;
+// l2 distance using avx512
+float l2_distance_avx512(float *a, float *b, int size) {
+    __m512 sum = _mm512_setzero_ps();
+    for (int i = 0; i < size; i += 16) {
+        __m512 a16 = _mm512_load_ps(a + i);
+        __m512 b16 = _mm512_load_ps(b + i);
+        __m512 diff = _mm512_sub_ps(a16, b16);
+        sum = _mm512_add_ps(sum, _mm512_mul_ps(diff, diff));
+    }
+    return sum[0] + sum[1] + sum[2] + sum[3] + sum[4] + sum[5] + sum[6] + sum[7] + sum[8] + sum[9] + sum[10] + sum[11] + sum[12] + sum[13] + sum[14] + sum[15];
+}
+
+float (*distance)(float *a, float *b, int size) = ip_distance_avx;
 
 class HNSWNode;
 
@@ -76,6 +147,11 @@ void quickselect(std::vector<std::pair<float, HNSWNode*>> &arr, int left, int ri
             quickselect(arr, pivot + 1, right, k);
         }
     }
+}
+
+void quickselect_vector(std::vector<std::pair<float, HNSWNode*>> &arr, int left, int right, int k) {
+
+
 }
 
 class HNSWNode {
