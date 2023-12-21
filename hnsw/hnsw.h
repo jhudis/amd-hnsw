@@ -12,6 +12,10 @@
 
 #include <immintrin.h>
 
+#ifdef __AVX512F__
+#include "avx512_argselect.h"
+#endif
+
 float ip_distance(float *a, float *b, int size) {
     float sum = 0;
     for (int i = 0; i < size; i++) {
@@ -107,6 +111,7 @@ float l2_distance_avx(float *a, float *b, int size) {
 }
 
 // l2 distance using avx512
+#ifdef __AVX512F__
 float l2_distance_avx512(float *a, float *b, int size) {
     __m512 sum = _mm512_setzero_ps();
     for (int i = 0; i < size; i += 16) {
@@ -117,6 +122,7 @@ float l2_distance_avx512(float *a, float *b, int size) {
     }
     return sum[0] + sum[1] + sum[2] + sum[3] + sum[4] + sum[5] + sum[6] + sum[7] + sum[8] + sum[9] + sum[10] + sum[11] + sum[12] + sum[13] + sum[14] + sum[15];
 }
+#endif
 
 float (*distance)(float *a, float *b, int size) = ip_distance_avx;
 
@@ -149,10 +155,25 @@ void quickselect(std::vector<std::pair<float, HNSWNode*>> &arr, int left, int ri
     }
 }
 
+#ifdef __AVX512F__
 void quickselect_vector(std::vector<std::pair<float, HNSWNode*>> &arr, int left, int right, int k) {
+    std::vector<std::pair<float, HNSWNode*>> ret;
+    float *dists = new float[arr.size()];
+    for (int i = 0; i < arr.size(); i++) {
+        dists[i] = arr[i].first;
+    }
 
+    ret.reserve(k);
 
+    std::vector<size_t> indices = avx512_argselect(dists, k, arr.size());
+
+    for (auto &index : indices) {
+        ret.push_back(arr[index]);
+    }
+
+    delete[] dists;
 }
+#endif
 
 class HNSWNode {
     int id;
