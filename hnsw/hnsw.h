@@ -48,6 +48,20 @@ float ip_distance_avx(float *a, float *b, int size) {
     return 1.0f - sum;
 }
 
+// ip distance usign avx512
+#ifdef __AVX512F__
+float ip_distance_avx512(float *a, float *b, int size) {
+    __m512 sum = _mm512_setzero_ps();
+    for (int i = 0; i < size; i += 16) {
+        __m512 v1 = _mm512_load_ps(a + i);
+        __m512 v2 = _mm512_load_ps(b + i);
+        __m512 prod = _mm512_mul_ps(v1, v2);
+        sum = _mm512_add_ps(sum, prod);
+    }
+    return 1.0f - sum[0] - sum[1] - sum[2] - sum[3] - sum[4] - sum[5] - sum[6] - sum[7] - sum[8] - sum[9] - sum[10] - sum[11] - sum[12] - sum[13] - sum[14] - sum[15];
+}
+#endif
+
 float l2_distance(float *a, float *b, int size) {
     float sum = 0;
     for (int i = 0; i < size; i++) {
