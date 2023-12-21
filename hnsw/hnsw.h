@@ -13,7 +13,7 @@
 #include <immintrin.h>
 
 #ifdef __AVX512F__
-#include "avx512_argselect.h"
+#include "x86simdsort.h"
 #endif
 
 float ip_distance(float *a, float *b, int size) {
@@ -138,7 +138,7 @@ float l2_distance_avx512(float *a, float *b, int size) {
 }
 #endif
 
-float (*distance)(float *a, float *b, int size) = ip_distance_avx;
+float (*distance)(float *a, float *b, int size) = l2_distance;
 
 class HNSWNode;
 
@@ -179,11 +179,13 @@ void quickselect_vector(std::vector<std::pair<float, HNSWNode*>> &arr, int left,
 
     ret.reserve(k);
 
-    std::vector<size_t> indices = avx512_argselect(dists, k, arr.size());
+    std::vector<size_t> indices = x86simdsort::argselect(dists, k-1, arr.size());
 
-    for (auto &index : indices) {
-        ret.push_back(arr[index]);
+    for (int i = 0; i < k; i++) {
+        ret.push_back(arr[indices[i]]);
     }
+
+    arr = ret;
 
     delete[] dists;
 }
@@ -375,7 +377,7 @@ public:
             return candidates;
         }
 
-        quickselect(candidates, 0, candidates.size() - 1, numNeighbors);
+        quickselect_vector(candidates, 0, candidates.size() - 1, numNeighbors);
         return std::vector<std::pair<float, HNSWNode*>>(candidates.begin(), candidates.begin() + numNeighbors);
     }
 

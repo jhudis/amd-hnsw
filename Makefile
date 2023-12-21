@@ -1,6 +1,7 @@
 CXX=clang++
 CXXFLAGS=-std=c++17 -g -Wall -march=native -O2
-LDLIBS=-lm
+LDFLAGS=-L/usr/local/lib/x86_64-linux-gnu
+LDLIBS=-lm -lx86simdsortcpp
 
 all: main
 
